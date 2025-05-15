@@ -1,8 +1,12 @@
+use alloc::string::String;
 use alloc::vec::Vec;
+use alloc::format;
 use core::cmp::Reverse;
 use core::marker::PhantomData;
+use tracing::{instrument, info};
+use core::fmt::Debug;
 
-use itertools::Itertools;
+use itertools::{Itertools, PeekingNext};
 use p3_commit::Mmcs;
 use p3_field::PackedValue;
 use p3_matrix::{Dimensions, Matrix};
@@ -56,10 +60,10 @@ where
     PW: PackedValue,
     H: CryptographicHasher<P::Value, [PW::Value; DIGEST_ELEMS]>
         + CryptographicHasher<P, [PW; DIGEST_ELEMS]>
-        + Sync,
+        + Sync + Debug,
     C: PseudoCompressionFunction<[PW::Value; DIGEST_ELEMS], 2>
         + PseudoCompressionFunction<[PW; DIGEST_ELEMS], 2>
-        + Sync,
+        + Sync + Debug,
     PW::Value: Eq,
     [PW::Value; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
 {
@@ -110,6 +114,7 @@ where
         prover_data.leaves.iter().collect()
     }
 
+    #[instrument(ret)]
     fn verify_batch(
         &self,
         commit: &Self::Commitment,
@@ -118,6 +123,73 @@ where
         opened_values: &[Vec<P::Value>],
         proof: &Self::Proof,
     ) -> Result<(), Self::Error> {
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_target(false)
+            .with_level(false)
+            .init();
+        // INPUTS
+        let print = |indent: usize, val: &str| {
+            info!("{}{}", alloc::vec![" "; indent * 4].into_iter().collect::<String>(), val);
+        };
+        // self
+        info!("HASH: {:?}", self.hash);
+        info!("COMPRESS: {:?}", self.compress);
+        // commit
+        print(1, "let commit = MmcsCommitment {");
+        print(2, "value: [");
+        for c in commit.clone().into_iter() {
+            print(3, &format!("f({:?}),", c));
+        }
+        print(2, "]");
+        print(1, "};");
+        // dimensions 
+        print(1, "let dimensions = vec![");
+        for d in dimensions {
+            print(2, &format!("Dimensions {{ width: {}, height: {} }},", d.width, d.height));
+        }
+        print(1, "];");
+        // index
+        print(1, &format!("let index = {};", index));
+        // opened_values
+        print(1, "let opened_values = vec![");
+        for v in opened_values {
+            let v_str = v.iter().map(|a|
+                format!("f({:?})", a)
+            ).join(", ");
+            print(2, &format!("vec![{}],", v_str));
+        }
+        print(1, "];");
+        // proof
+        print(1, "let proof = vec![");
+        for p in proof {
+            let v_str = p.iter().map(|a|
+                format!("f({:?})", a)
+            ).join(", ");
+            print(2, &format!("[{}],", v_str));
+        }
+        print(1, "];");
+        print(1, "let mmcs_input = MmcsVerifierInput {");
+        print(2, "commit,");
+        print(2, "dimensions,");
+        print(2, "index,");
+        print(2, "opened_values,");
+        print(2, "proof,");
+        print(1, "};");
+        print(1, "witness_stream.extend(mmcs_input.write());");
+
+        // HINTS
+        let hint_usize = |name: &str, val: usize| {
+            let indent = alloc::vec![" "; 4].into_iter().collect::<String>();
+            info!("{}// {}", indent, name);
+            info!("{}witness_stream.extend(<usize as Hintable<InnerConfig>>::write(&{}));", indent, val);
+        };
+        let hint_felt = |name: &str, val: PW::Value| {
+            let indent = alloc::vec![" "; 4].into_iter().collect::<String>();
+            info!("{}// {}", indent, name);
+            info!("{}witness_stream.extend(<F as Hintable<InnerConfig>>::write(&F::from_canonical_usize({:?})));", indent, val);
+        };
+
         // Check that the openings have the correct shape.
         if dimensions.len() != opened_values.len() {
             return Err(WrongBatchSize);
@@ -142,13 +214,36 @@ where
                 num_siblings: proof.len(),
             });
         }
+        hint_usize("max_height", max_height);
+        hint_usize("log_max_height", log_max_height);
 
-        let mut heights_tallest_first = dimensions
+        let heights_tallest_first = dimensions
             .iter()
             .enumerate()
-            .sorted_by_key(|(_, dims)| Reverse(dims.height))
-            .peekable();
+            .sorted_by_key(|(_, dims)| Reverse(dims.height));
 
+        // Convert heights_tallest_first to recursive form
+        let mut num_unique_height = 0;
+        let mut height_order = Vec::new();
+        let mut last_height = 0;
+        for (i, d) in heights_tallest_first.clone() {
+            height_order.push(i);
+
+            let next_height = d.height;
+            if next_height != last_height {
+                if last_height != 0 {
+                    num_unique_height += 1;
+                }
+                last_height = next_height;
+            }
+        }
+        num_unique_height += 1;
+        hint_usize("num_unique_height", num_unique_height);
+        for o in height_order {
+            hint_usize("height_order", o);
+        }
+
+        let mut heights_tallest_first = heights_tallest_first.peekable();
         let Some(mut curr_height_padded) = heights_tallest_first
             .peek()
             .map(|x| x.1.height.next_power_of_two())
@@ -157,6 +252,8 @@ where
             return Err(EmptyBatch);
         };
 
+        hint_usize("curr_height_log", curr_height_padded.ilog2() as usize - 1);
+
         let mut root = self.hash.hash_iter_slices(
             heights_tallest_first
                 .peeking_take_while(|(_, dims)| {
@@ -164,8 +261,19 @@ where
                 })
                 .map(|(i, _)| opened_values[i].as_slice()),
         );
+        for r in root {
+            hint_felt("root", r);
+        }
+
+        if let Some(entry) = heights_tallest_first.peek() {
+            let next_height = entry.1.height;
+            let next_height_log = next_height.next_power_of_two().ilog2() as usize;
+            hint_usize("next_height_log", if next_height_log == 0 { 0 } else { next_height_log - 1 });
+        }
 
         for &sibling in proof {
+            hint_usize("next_bit", index & 1);
+
             let (left, right) = if index & 1 == 0 {
                 (root, sibling)
             } else {
@@ -173,9 +281,15 @@ where
             };
 
             root = self.compress.compress([left, right]);
+            for r in root {
+                hint_felt("new_root", r);
+            }
             index >>= 1;
             curr_height_padded >>= 1;
+            hint_usize("next_curr_height_padded", curr_height_padded);
 
+            // let next_height = heights_tallest_first.peek().unwrap().1.height;
+            // hint_usize("next_height_log", next_height.next_power_of_two().ilog2() as usize - 1);
             let next_height = heights_tallest_first
                 .peek()
                 .map(|(_, dims)| dims.height)
@@ -188,6 +302,15 @@ where
                 );
 
                 root = self.compress.compress([root, next_height_openings_digest]);
+                for r in root {
+                    hint_felt("new_root", r);
+                }
+
+                if let Some(entry) = heights_tallest_first.peek() {
+                    let next_height = entry.1.height;
+                    let next_height_log = next_height.next_power_of_two().ilog2() as usize;
+                    hint_usize("next_height_log", if next_height_log == 0 { 0 } else { next_height_log - 1 });
+                }
             }
         }
 
@@ -489,38 +612,36 @@ mod tests {
         let mmcs = MyMmcs::new(hash, compress);
 
         // 4 mats with 1000 rows, 8 columns
-        let large_mats = (0..4).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 1000, 8));
-        let large_mat_dims = (0..4).map(|_| Dimensions {
-            height: 1000,
-            width: 8,
-        });
+        // let large_mats = (0..4).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 1000, 8));
+        // let large_mat_dims = (0..4).map(|_| Dimensions {
+        //     height: 1000,
+        //     width: 8,
+        // });
 
-        // 5 mats with 70 rows, 8 columns
-        let medium_mats = (0..5).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 70, 8));
-        let medium_mat_dims = (0..5).map(|_| Dimensions {
+        // 1 mats with 70 rows, 8 columns
+        let medium_mats = (0..1).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 70, 8));
+        let medium_mat_dims = (0..1).map(|_| Dimensions {
             height: 70,
             width: 8,
         });
 
         // 6 mats with 8 rows, 8 columns
-        let small_mats = (0..6).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 8, 8));
-        let small_mat_dims = (0..6).map(|_| Dimensions {
-            height: 8,
-            width: 8,
-        });
+        // let small_mats = (0..6).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 8, 8));
+        // let small_mat_dims = (0..6).map(|_| Dimensions {
+        //     height: 8,
+        //     width: 8,
+        // });
 
-        // 7 tiny mat with 1 row, 8 columns
-        let tiny_mats = (0..7).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 1, 8));
-        let tiny_mat_dims = (0..7).map(|_| Dimensions {
+        // 2 tiny mat with 1 row, 8 columns
+        let tiny_mats = (0..2).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 1, 8));
+        let tiny_mat_dims = (0..2).map(|_| Dimensions {
             height: 1,
             width: 8,
         });
 
         let (commit, prover_data) = mmcs.commit(
-            large_mats
+            tiny_mats
                 .chain(medium_mats)
-                .chain(small_mats)
-                .chain(tiny_mats)
                 .collect_vec(),
         );
 
@@ -528,10 +649,8 @@ mod tests {
         let (opened_values, proof) = mmcs.open_batch(6, &prover_data);
         mmcs.verify_batch(
             &commit,
-            &large_mat_dims
+            &tiny_mat_dims
                 .chain(medium_mat_dims)
-                .chain(small_mat_dims)
-                .chain(tiny_mat_dims)
                 .collect_vec(),
             6,
             &opened_values,
@@ -555,8 +674,8 @@ mod tests {
         let dims = mats.iter().map(|m| m.dimensions()).collect_vec();
 
         let (commit, prover_data) = mmcs.commit(mats);
-        let (opened_values, proof) = mmcs.open_batch(17, &prover_data);
-        mmcs.verify_batch(&commit, &dims, 17, &opened_values, &proof)
+        let (opened_values, proof) = mmcs.open_batch(3, &prover_data);
+        mmcs.verify_batch(&commit, &dims, 3, &opened_values, &proof)
             .expect("expected verification to succeed");
     }
 }

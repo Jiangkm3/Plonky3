@@ -1,6 +1,7 @@
 use core::mem::MaybeUninit;
 use core::ops::Div;
 use core::slice;
+use core::fmt::Debug;
 
 use crate::field::Field;
 use crate::{Algebra, BasedVectorSpace, ExtensionField, Powers, PrimeCharacteristicRing};
@@ -13,8 +14,8 @@ pub trait Packable: 'static + Default + Copy + Send + Sync + PartialEq + Eq {}
 /// # Safety
 /// - If `P` implements `PackedField` then `P` must be castable to/from `[P::Value; P::WIDTH]`
 ///   without UB.
-pub unsafe trait PackedValue: 'static + Copy + Send + Sync {
-    type Value: Packable;
+pub unsafe trait PackedValue: 'static + Debug + Copy + Send + Sync {
+    type Value: Packable + Debug;
 
     const WIDTH: usize;
 
@@ -98,7 +99,7 @@ pub unsafe trait PackedValue: 'static + Copy + Send + Sync {
     }
 }
 
-unsafe impl<T: Packable, const WIDTH: usize> PackedValue for [T; WIDTH] {
+unsafe impl<T: Packable + Debug, const WIDTH: usize> PackedValue for [T; WIDTH] {
     type Value = T;
     const WIDTH: usize = WIDTH;
 
@@ -228,7 +229,7 @@ pub trait PackedFieldExtension<
     fn packed_ext_powers(base: ExtField) -> Powers<Self>;
 }
 
-unsafe impl<T: Packable> PackedValue for T {
+unsafe impl<T: Packable + Debug> PackedValue for T {
     type Value = Self;
 
     const WIDTH: usize = 1;

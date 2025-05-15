@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use core::fmt::Debug;
 
 use itertools::Itertools;
 use p3_commit::Mmcs;
@@ -61,10 +62,10 @@ where
     PW: PackedValue,
     H: CryptographicHasher<P::Value, [PW::Value; DIGEST_ELEMS]>
         + CryptographicHasher<P, [PW; DIGEST_ELEMS]>
-        + Sync,
+        + Sync + Debug,
     C: PseudoCompressionFunction<[PW::Value; DIGEST_ELEMS], 2>
         + PseudoCompressionFunction<[PW; DIGEST_ELEMS], 2>
-        + Sync,
+        + Sync + Debug,
     R: Rng + Clone,
     PW::Value: Eq,
     [PW::Value; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
