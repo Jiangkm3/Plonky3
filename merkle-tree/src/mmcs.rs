@@ -1,10 +1,9 @@
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use alloc::format;
 use core::cmp::Reverse;
-use core::marker::PhantomData;
-use tracing::{instrument, info};
 use core::fmt::Debug;
+use core::marker::PhantomData;
 
 use itertools::{Itertools, PeekingNext};
 use p3_commit::Mmcs;
@@ -13,6 +12,7 @@ use p3_matrix::{Dimensions, Matrix};
 use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
 use p3_util::log2_ceil_usize;
 use serde::{Deserialize, Serialize};
+use tracing::{info, instrument};
 
 use crate::MerkleTree;
 use crate::MerkleTreeError::{EmptyBatch, RootMismatch, WrongBatchSize, WrongHeight};
@@ -60,10 +60,12 @@ where
     PW: PackedValue,
     H: CryptographicHasher<P::Value, [PW::Value; DIGEST_ELEMS]>
         + CryptographicHasher<P, [PW; DIGEST_ELEMS]>
-        + Sync + Debug,
+        + Sync
+        + Debug,
     C: PseudoCompressionFunction<[PW::Value; DIGEST_ELEMS], 2>
         + PseudoCompressionFunction<[PW; DIGEST_ELEMS], 2>
-        + Sync + Debug,
+        + Sync
+        + Debug,
     PW::Value: Eq,
     [PW::Value; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
 {
@@ -130,7 +132,11 @@ where
             .init();
         // INPUTS
         let print = |indent: usize, val: &str| {
-            info!("{}{}", alloc::vec![" "; indent * 4].into_iter().collect::<String>(), val);
+            info!(
+                "{}{}",
+                alloc::vec![" "; indent * 4].into_iter().collect::<String>(),
+                val
+            );
         };
         // self
         info!("HASH: {:?}", self.hash);
@@ -143,10 +149,13 @@ where
         }
         print(2, "]");
         print(1, "};");
-        // dimensions 
+        // dimensions
         print(1, "let dimensions = vec![");
         for d in dimensions {
-            print(2, &format!("Dimensions {{ width: {}, height: {} }},", d.width, d.height));
+            print(
+                2,
+                &format!("Dimensions {{ width: {}, height: {} }},", d.width, d.height),
+            );
         }
         print(1, "];");
         // index
@@ -154,18 +163,14 @@ where
         // opened_values
         print(1, "let opened_values = vec![");
         for v in opened_values {
-            let v_str = v.iter().map(|a|
-                format!("f({:?})", a)
-            ).join(", ");
+            let v_str = v.iter().map(|a| format!("f({:?})", a)).join(", ");
             print(2, &format!("vec![{}],", v_str));
         }
         print(1, "];");
         // proof
         print(1, "let proof = vec![");
         for p in proof {
-            let v_str = p.iter().map(|a|
-                format!("f({:?})", a)
-            ).join(", ");
+            let v_str = p.iter().map(|a| format!("f({:?})", a)).join(", ");
             print(2, &format!("[{}],", v_str));
         }
         print(1, "];");
@@ -182,7 +187,10 @@ where
         let hint_usize = |name: &str, val: usize| {
             let indent = alloc::vec![" "; 4].into_iter().collect::<String>();
             info!("{}// {}", indent, name);
-            info!("{}witness_stream.extend(<usize as Hintable<InnerConfig>>::write(&{}));", indent, val);
+            info!(
+                "{}witness_stream.extend(<usize as Hintable<InnerConfig>>::write(&{}));",
+                indent, val
+            );
         };
         let hint_felt = |name: &str, val: PW::Value| {
             let indent = alloc::vec![" "; 4].into_iter().collect::<String>();
@@ -268,7 +276,14 @@ where
         if let Some(entry) = heights_tallest_first.peek() {
             let next_height = entry.1.height;
             let next_height_log = next_height.next_power_of_two().ilog2() as usize;
-            hint_usize("next_height_log", if next_height_log == 0 { 0 } else { next_height_log - 1 });
+            hint_usize(
+                "next_height_log",
+                if next_height_log == 0 {
+                    0
+                } else {
+                    next_height_log - 1
+                },
+            );
         }
 
         for &sibling in proof {
@@ -309,7 +324,14 @@ where
                 if let Some(entry) = heights_tallest_first.peek() {
                     let next_height = entry.1.height;
                     let next_height_log = next_height.next_power_of_two().ilog2() as usize;
-                    hint_usize("next_height_log", if next_height_log == 0 { 0 } else { next_height_log - 1 });
+                    hint_usize(
+                        "next_height_log",
+                        if next_height_log == 0 {
+                            0
+                        } else {
+                            next_height_log - 1
+                        },
+                    );
                 }
             }
         }
@@ -326,12 +348,14 @@ where
 mod tests {
     use alloc::vec;
 
-    use itertools::Itertools;
+    use itertools::{Itertools, Position};
+    use openvm_poseidon2_air::{Poseidon2Config, Poseidon2Constants};
     use p3_baby_bear::{BabyBear, Poseidon2BabyBear};
     use p3_commit::Mmcs;
-    use p3_field::{Field, PrimeCharacteristicRing};
+    use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
     use p3_matrix::dense::RowMajorMatrix;
     use p3_matrix::{Dimensions, Matrix};
+    use p3_poseidon2::ExternalLayerConstants;
     use p3_symmetric::{
         CryptographicHasher, PaddingFreeSponge, PseudoCompressionFunction, TruncatedPermutation,
     };
@@ -603,10 +627,91 @@ mod tests {
         .expect_err("expected verification to fail");
     }
 
+    use zkhash::ark_ff::PrimeField as _;
+    use zkhash::fields::babybear::FpBabyBear as HorizenBabyBear;
+    use zkhash::poseidon2::poseidon2_instance_babybear::RC16;
+
+    fn horizen_to_p3_babybear(horizen_babybear: HorizenBabyBear) -> BabyBear {
+        BabyBear::from_u64(horizen_babybear.into_bigint().0[0])
+    }
+
+    const BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS: usize = 4;
+    const BABY_BEAR_POSEIDON2_FULL_ROUNDS: usize = 8;
+    const BABY_BEAR_POSEIDON2_PARTIAL_ROUNDS: usize = 13;
+    const POSEIDON2_WIDTH: usize = 16;
+
+    use core::array::from_fn;
+
+    fn horizen_round_consts() -> Poseidon2Constants<BabyBear> {
+        let p3_rc16: vec::Vec<vec::Vec<BabyBear>> = RC16
+            .iter()
+            .map(|round| {
+                round
+                    .iter()
+                    .map(|babybear| horizen_to_p3_babybear(*babybear))
+                    .collect()
+            })
+            .collect();
+        let p_end = BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS + BABY_BEAR_POSEIDON2_PARTIAL_ROUNDS;
+
+        let beginning_full_round_constants: [[BabyBear; POSEIDON2_WIDTH];
+            BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS] =
+            from_fn(|i| p3_rc16[i].clone().try_into().unwrap());
+        let partial_round_constants: [BabyBear; BABY_BEAR_POSEIDON2_PARTIAL_ROUNDS] =
+            from_fn(|i| p3_rc16[i + BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS][0]);
+        let ending_full_round_constants: [[BabyBear; POSEIDON2_WIDTH];
+            BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS] =
+            from_fn(|i| p3_rc16[i + p_end].clone().try_into().unwrap());
+
+        Poseidon2Constants {
+            beginning_full_round_constants,
+            partial_round_constants,
+            ending_full_round_constants,
+        }
+    }
+
+    use lazy_static::lazy_static;
+
+    lazy_static! {
+        pub static ref BABYBEAR_BEGIN_EXT_CONSTS: [[BabyBear; POSEIDON2_WIDTH]; BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS] =
+            horizen_round_consts().beginning_full_round_constants;
+        pub static ref BABYBEAR_PARTIAL_CONSTS: [BabyBear; BABY_BEAR_POSEIDON2_PARTIAL_ROUNDS] =
+            horizen_round_consts().partial_round_constants;
+        pub static ref BABYBEAR_END_EXT_CONSTS: [[BabyBear; POSEIDON2_WIDTH]; BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS] =
+            horizen_round_consts().ending_full_round_constants;
+    }
+
+    fn default_baby_bear_rc<F: Field>() -> Poseidon2Constants<F> {
+        let convert_field = |f: BabyBear| F::from_u32(f.as_canonical_u32());
+        Poseidon2Constants {
+            beginning_full_round_constants: BABYBEAR_BEGIN_EXT_CONSTS.map(|x| x.map(convert_field)),
+            partial_round_constants: BABYBEAR_PARTIAL_CONSTS.map(convert_field),
+            ending_full_round_constants: BABYBEAR_END_EXT_CONSTS.map(|x| x.map(convert_field)),
+        }
+    }
+
+    fn to_external_internal_constants(
+        constants: &Poseidon2Constants<BabyBear>,
+    ) -> (
+        ExternalLayerConstants<BabyBear, POSEIDON2_WIDTH>,
+        alloc::vec::Vec<BabyBear>,
+    ) {
+        (
+            ExternalLayerConstants::new(
+                constants.beginning_full_round_constants.to_vec(),
+                constants.ending_full_round_constants.to_vec(),
+            ),
+            constants.partial_round_constants.to_vec(),
+        )
+    }
+
     #[test]
     fn size_gaps() {
-        let mut rng = thread_rng();
-        let perm = Perm::new_from_rng_128(&mut rng);
+        let poseidon2_constants = default_baby_bear_rc::<BabyBear>();
+        let (external_constants, internal_constants) =
+            to_external_internal_constants(&poseidon2_constants);
+
+        let perm = Perm::new(external_constants, internal_constants);
         let hash = MyHash::new(perm.clone());
         let compress = MyCompress::new(perm);
         let mmcs = MyMmcs::new(hash, compress);
@@ -639,19 +744,13 @@ mod tests {
             width: 8,
         });
 
-        let (commit, prover_data) = mmcs.commit(
-            tiny_mats
-                .chain(medium_mats)
-                .collect_vec(),
-        );
+        let (commit, prover_data) = mmcs.commit(medium_mats.chain(tiny_mats).collect_vec());
 
         // open the 6th row of each matrix and verify
         let (opened_values, proof) = mmcs.open_batch(6, &prover_data);
         mmcs.verify_batch(
             &commit,
-            &tiny_mat_dims
-                .chain(medium_mat_dims)
-                .collect_vec(),
+            &medium_mat_dims.chain(tiny_mat_dims).collect_vec(),
             6,
             &opened_values,
             &proof,

@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+openvm-poseidon2-air = { git = "https://github.com/openvm-org/openvm.git", default-features = false, tag = "v1.0.0" }
 p3-field.workspace = true
 p3-matrix.workspace = true
 p3-maybe-rayon.workspace = true
@@ -25,6 +26,8 @@ p3-mds.workspace = true
 p3-poseidon2.workspace = true
 p3-rescue.workspace = true
 criterion.workspace = true
+zkhash = { git = "https://github.com/HorizenLabs/poseidon2.git", rev = "bb476b9" }
+lazy_static = "1.5.0"
 
 [[bench]]
 name = "merkle_tree"
