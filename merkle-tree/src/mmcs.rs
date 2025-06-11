@@ -241,6 +241,7 @@ where
                 })
                 .map(|(i, _)| opened_values[i].as_slice()),
         );
+        info!("Initial root hash after tallest leaves: {:?}", root);
 
         for &sibling in proof {
             let (left, right) = if index & 1 == 0 {
@@ -252,6 +253,7 @@ where
             root = self.compress.compress([left, right]);
             index >>= 1;
             curr_height_padded >>= 1;
+            info!("Root hash after sibling: {:?}", root);
 
             // let next_height = heights_tallest_first.peek().unwrap().1.height;
             // hint_usize("next_height_log", next_height.next_power_of_two().ilog2() as usize - 1);
@@ -268,6 +270,7 @@ where
 
                 root = self.compress.compress([root, next_height_openings_digest]);
             }
+            info!("Root hash after merging rows: {:?}", root);
         }
 
         if commit == &root {
@@ -292,7 +295,8 @@ mod tests {
     use p3_symmetric::{
         CryptographicHasher, PaddingFreeSponge, PseudoCompressionFunction, TruncatedPermutation,
     };
-    use rand::thread_rng;
+    use rand::rngs::StdRng;
+    use rand::{thread_rng, SeedableRng};
 
     use super::MerkleTreeMmcs;
 
@@ -649,6 +653,7 @@ mod tests {
 
     #[test]
     fn size_gaps() {
+        let mut rng = StdRng::from_seed(Default::default());
         let poseidon2_constants = default_baby_bear_rc::<BabyBear>();
         let (external_constants, internal_constants) =
             to_external_internal_constants(&poseidon2_constants);
@@ -666,7 +671,7 @@ mod tests {
         // });
 
         // 1 mats with 70 rows, 8 columns
-        let medium_mats = (0..1).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 70, 8));
+        let medium_mats = (0..1).map(|_| RowMajorMatrix::<F>::rand(&mut rng.clone(), 70, 8));
         let medium_mat_dims = (0..1).map(|_| Dimensions {
             height: 70,
             width: 8,
@@ -680,7 +685,7 @@ mod tests {
         // });
 
         // 2 tiny mat with 1 row, 8 columns
-        let tiny_mats = (0..2).map(|_| RowMajorMatrix::<F>::rand(&mut thread_rng(), 1, 8));
+        let tiny_mats = (0..2).map(|_| RowMajorMatrix::<F>::rand(&mut rng.clone(), 1, 8));
         let tiny_mat_dims = (0..2).map(|_| Dimensions {
             height: 1,
             width: 8,
