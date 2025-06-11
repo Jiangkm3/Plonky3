@@ -349,7 +349,6 @@ mod tests {
     use alloc::vec;
 
     use itertools::{Itertools, Position};
-    use openvm_poseidon2_air::{Poseidon2Config, Poseidon2Constants};
     use p3_baby_bear::{BabyBear, Poseidon2BabyBear};
     use p3_commit::Mmcs;
     use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
@@ -679,6 +678,15 @@ mod tests {
             horizen_round_consts().partial_round_constants;
         pub static ref BABYBEAR_END_EXT_CONSTS: [[BabyBear; POSEIDON2_WIDTH]; BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS] =
             horizen_round_consts().ending_full_round_constants;
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct Poseidon2Constants<F> {
+        pub beginning_full_round_constants:
+            [[F; POSEIDON2_WIDTH]; BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS],
+        pub partial_round_constants: [F; BABY_BEAR_POSEIDON2_PARTIAL_ROUNDS],
+        pub ending_full_round_constants:
+            [[F; POSEIDON2_WIDTH]; BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS],
     }
 
     fn default_baby_bear_rc<F: Field>() -> Poseidon2Constants<F> {
