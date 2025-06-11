@@ -183,21 +183,6 @@ where
         print(1, "};");
         print(1, "witness_stream.extend(mmcs_input.write());");
 
-        // HINTS
-        let hint_usize = |name: &str, val: usize| {
-            let indent = alloc::vec![" "; 4].into_iter().collect::<String>();
-            info!("{}// {}", indent, name);
-            info!(
-                "{}witness_stream.extend(<usize as Hintable<InnerConfig>>::write(&{}));",
-                indent, val
-            );
-        };
-        let hint_felt = |name: &str, val: PW::Value| {
-            let indent = alloc::vec![" "; 4].into_iter().collect::<String>();
-            info!("{}// {}", indent, name);
-            info!("{}witness_stream.extend(<F as Hintable<InnerConfig>>::write(&F::from_canonical_usize({:?})));", indent, val);
-        };
-
         // Check that the openings have the correct shape.
         if dimensions.len() != opened_values.len() {
             return Err(WrongBatchSize);
@@ -222,8 +207,6 @@ where
                 num_siblings: proof.len(),
             });
         }
-        hint_usize("max_height", max_height);
-        hint_usize("log_max_height", log_max_height);
 
         let heights_tallest_first = dimensions
             .iter()
@@ -231,7 +214,6 @@ where
             .sorted_by_key(|(_, dims)| Reverse(dims.height));
 
         // Convert heights_tallest_first to recursive form
-        let mut num_unique_height = 0;
         let mut height_order = Vec::new();
         let mut last_height = 0;
         for (i, d) in heights_tallest_first.clone() {
@@ -239,16 +221,8 @@ where
 
             let next_height = d.height;
             if next_height != last_height {
-                if last_height != 0 {
-                    num_unique_height += 1;
-                }
                 last_height = next_height;
             }
-        }
-        num_unique_height += 1;
-        hint_usize("num_unique_height", num_unique_height);
-        for o in height_order {
-            hint_usize("height_order", o);
         }
 
         let mut heights_tallest_first = heights_tallest_first.peekable();
@@ -260,8 +234,6 @@ where
             return Err(EmptyBatch);
         };
 
-        hint_usize("curr_height_log", curr_height_padded.ilog2() as usize - 1);
-
         let mut root = self.hash.hash_iter_slices(
             heights_tallest_first
                 .peeking_take_while(|(_, dims)| {
@@ -269,26 +241,8 @@ where
                 })
                 .map(|(i, _)| opened_values[i].as_slice()),
         );
-        for r in root {
-            hint_felt("root", r);
-        }
-
-        if let Some(entry) = heights_tallest_first.peek() {
-            let next_height = entry.1.height;
-            let next_height_log = next_height.next_power_of_two().ilog2() as usize;
-            hint_usize(
-                "next_height_log",
-                if next_height_log == 0 {
-                    0
-                } else {
-                    next_height_log - 1
-                },
-            );
-        }
 
         for &sibling in proof {
-            hint_usize("next_bit", index & 1);
-
             let (left, right) = if index & 1 == 0 {
                 (root, sibling)
             } else {
@@ -296,12 +250,8 @@ where
             };
 
             root = self.compress.compress([left, right]);
-            for r in root {
-                hint_felt("new_root", r);
-            }
             index >>= 1;
             curr_height_padded >>= 1;
-            hint_usize("next_curr_height_padded", curr_height_padded);
 
             // let next_height = heights_tallest_first.peek().unwrap().1.height;
             // hint_usize("next_height_log", next_height.next_power_of_two().ilog2() as usize - 1);
@@ -317,22 +267,6 @@ where
                 );
 
                 root = self.compress.compress([root, next_height_openings_digest]);
-                for r in root {
-                    hint_felt("new_root", r);
-                }
-
-                if let Some(entry) = heights_tallest_first.peek() {
-                    let next_height = entry.1.height;
-                    let next_height_log = next_height.next_power_of_two().ilog2() as usize;
-                    hint_usize(
-                        "next_height_log",
-                        if next_height_log == 0 {
-                            0
-                        } else {
-                            next_height_log - 1
-                        },
-                    );
-                }
             }
         }
 
